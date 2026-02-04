@@ -121,11 +121,6 @@ def get_source_name(key: str) -> str:
     """Get the OBS source name for a data point key."""
     return f"{SOURCE_PREFIX}{key}"
 
-def get_current_scene():
-    """Get the current scene source."""
-    current_scene = obs.obs_frontend_get_current_scene()
-    return current_scene
-
 def create_text_source(key: str, initial_text: str = "---") -> bool:
     """Create a text source and add it to the current scene."""
     source_name = get_source_name(key)
@@ -139,56 +134,60 @@ def create_text_source(key: str, initial_text: str = "---") -> bool:
         return True
 
     # Get current scene
-    current_scene = get_current_scene()
+    current_scene = obs.obs_frontend_get_current_scene()
     if not current_scene:
-        obs.script_log(obs.LOG_WARNING, "No scene available to add source to")
+        obs.script_log(obs.LOG_WARNING, "No scene available - please select a scene first")
         return False
 
     scene = obs.obs_scene_from_source(current_scene)
     if not scene:
         obs.obs_source_release(current_scene)
-        obs.script_log(obs.LOG_WARNING, "Could not get scene from source")
+        obs.script_log(obs.LOG_WARNING, "Could not get scene object")
         return False
 
     # Create settings for text source
     settings = obs.obs_data_create()
     obs.obs_data_set_string(settings, "text", initial_text)
 
-    # Font settings for better visibility
-    font = obs.obs_data_create()
-    obs.obs_data_set_string(font, "face", "Arial")
-    obs.obs_data_set_int(font, "size", 48)
-    obs.obs_data_set_int(font, "flags", 0)  # 0 = normal, 1 = bold
-    obs.obs_data_set_obj(settings, "font", font)
-    obs.obs_data_release(font)
+    # Font settings - use simple approach that works across OBS versions
+    font_obj = obs.obs_data_create()
+    obs.obs_data_set_string(font_obj, "face", "Arial")
+    obs.obs_data_set_int(font_obj, "size", 48)
+    obs.obs_data_set_obj(settings, "font", font_obj)
+    obs.obs_data_release(font_obj)
 
-    # Color settings (white text)
-    obs.obs_data_set_int(settings, "color", 0xFFFFFFFF)
+    # Try different text source types (OBS version compatibility)
+    source = None
+    for source_type in ["text_gdiplus", "text_gdiplus_v2", "text_gdiplus_v3"]:
+        source = obs.obs_source_create(source_type, source_name, settings, None)
+        if source:
+            obs.script_log(obs.LOG_INFO, f"Using source type: {source_type}")
+            break
 
-    # Create the text source (use text_gdiplus_v2 for Windows)
-    source = obs.obs_source_create("text_gdiplus_v2", source_name, settings, None)
     obs.obs_data_release(settings)
 
-    if source:
-        # Add source to scene
-        scene_item = obs.obs_scene_add(scene, source)
-        if scene_item:
-            # Position sources in a column
-            pos = obs.vec2()
-            idx = list(DATA_POINTS.keys()).index(key) if key in DATA_POINTS else 0
-            pos.x = 50
-            pos.y = 50 + (idx * 60)
-            obs.obs_sceneitem_set_pos(scene_item, pos)
-            obs.script_log(obs.LOG_INFO, f"Created and added source: {source_name}")
-            state.created_sources.add(source_name)
-        else:
-            obs.script_log(obs.LOG_WARNING, f"Failed to add source to scene: {source_name}")
-        obs.obs_source_release(source)
-    else:
-        obs.script_log(obs.LOG_WARNING, f"Failed to create source: {source_name}")
+    if not source:
+        obs.script_log(obs.LOG_ERROR, f"Failed to create text source (tried all types): {source_name}")
+        obs.obs_source_release(current_scene)
+        return False
 
+    # Add source to scene
+    scene_item = obs.obs_scene_add(scene, source)
+    if scene_item:
+        # Position sources in a column
+        pos = obs.vec2()
+        idx = list(DATA_POINTS.keys()).index(key) if key in DATA_POINTS else 0
+        pos.x = 50
+        pos.y = 50 + (idx * 70)
+        obs.obs_sceneitem_set_pos(scene_item, pos)
+        obs.script_log(obs.LOG_INFO, f"SUCCESS: Added {source_name} to scene at ({pos.x}, {pos.y})")
+        state.created_sources.add(source_name)
+    else:
+        obs.script_log(obs.LOG_ERROR, f"FAILED: Could not add {source_name} to scene")
+
+    obs.obs_source_release(source)
     obs.obs_source_release(current_scene)
-    return source is not None
+    return scene_item is not None
 
 def update_text_source(key: str, text: str):
     """Update the text content of a source."""
