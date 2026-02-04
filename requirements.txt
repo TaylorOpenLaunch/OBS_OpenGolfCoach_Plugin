@@ -1,0 +1,4 @@
+# Open Golf Coach OBS Plugin Dependencies
+
+# Required: Golf shot calculations
+opengolfcoach>=0.1.0
