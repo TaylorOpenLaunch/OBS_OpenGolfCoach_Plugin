@@ -1,12 +1,13 @@
 """
 OBS Open Golf Coach Plugin
 ==========================
-Receives golf shot data and displays each data point as a separate,
-moveable text source in OBS.
+Receives golf shot data directly from Nova launch monitor and displays
+each data point as a separate, moveable text source in OBS.
 
-This plugin can work in two modes:
-1. Standalone: Receives processed OGC JSON data
-2. With OpenAPI service: Receives data from ogc_openapi_service.py
+Implements the OpenAPI protocol that Nova uses:
+1. Sends handshake on connect: {"Code":201,"GameId":"OpenGolfCoach"}
+2. Keeps connection alive for multiple shots
+3. Converts OpenAPI format and calculates derived values
 
 Author: Open Golf Coach Community
 License: MIT
@@ -18,15 +19,22 @@ import socket
 import threading
 import queue
 from typing import Optional, Dict, Any
-import time
 
 # =============================================================================
 # Configuration
 # =============================================================================
 
-DEFAULT_PORT = 9211  # Port for receiving processed OGC data
+DEFAULT_PORT = 921  # OpenAPI port that Nova connects to
 DEFAULT_HOST = "0.0.0.0"
 SOURCE_PREFIX = "OGC_"
+OPENAPI_HANDSHAKE = '{"Code":201,"GameId":"OpenGolfCoach"}'
+
+# Try to import opengolfcoach for calculations
+try:
+    import opengolfcoach
+    HAS_OGC = True
+except ImportError:
+    HAS_OGC = False
 
 # Data point definitions: (json_path, display_name, format_string, unit)
 DATA_POINTS = {
@@ -56,7 +64,6 @@ DATA_POINTS = {
 # =============================================================================
 
 class PluginState:
-    """Holds the global state of the plugin."""
     def __init__(self):
         self.server_thread: Optional[threading.Thread] = None
         self.server_socket: Optional[socket.socket] = None
@@ -71,6 +78,85 @@ class PluginState:
         self.created_sources: set = set()
 
 state = PluginState()
+
+# =============================================================================
+# OpenAPI Protocol Handling
+# =============================================================================
+
+def convert_openapi_to_ogc(openapi_data: dict) -> dict:
+    """Convert OpenAPI format (from Nova) to Open Golf Coach format."""
+    ogc_input = {}
+
+    ball_data = openapi_data.get("BallData", {})
+    units = openapi_data.get("Units", "Yards")
+    is_imperial = "Yards" in units or "MPH" in units
+
+    # Speed -> ball_speed_meters_per_second
+    speed = ball_data.get("Speed")
+    if speed is not None:
+        if is_imperial:
+            ogc_input["ball_speed_meters_per_second"] = speed * 0.44704
+        else:
+            ogc_input["ball_speed_meters_per_second"] = speed
+
+    # VLA -> vertical_launch_angle_degrees
+    vla = ball_data.get("VLA")
+    if vla is not None:
+        ogc_input["vertical_launch_angle_degrees"] = vla
+
+    # HLA -> horizontal_launch_angle_degrees
+    hla = ball_data.get("HLA")
+    if hla is not None:
+        ogc_input["horizontal_launch_angle_degrees"] = hla
+
+    # TotalSpin -> total_spin_rpm
+    total_spin = ball_data.get("TotalSpin")
+    if total_spin is not None:
+        ogc_input["total_spin_rpm"] = total_spin
+
+    # SpinAxis -> spin_axis_degrees
+    spin_axis = ball_data.get("SpinAxis")
+    if spin_axis is not None:
+        ogc_input["spin_axis_degrees"] = spin_axis
+
+    # BackSpin and SideSpin if provided
+    backspin = ball_data.get("BackSpin")
+    sidespin = ball_data.get("SideSpin")
+    if backspin is not None:
+        ogc_input["backspin_rpm"] = backspin
+    if sidespin is not None:
+        ogc_input["sidespin_rpm"] = sidespin
+
+    return ogc_input
+
+def process_shot(openapi_data: dict) -> Optional[dict]:
+    """Process shot data - convert and calculate derived values."""
+    # Check if this is OpenAPI format (has BallData) or already OGC format
+    if "BallData" in openapi_data:
+        ogc_input = convert_openapi_to_ogc(openapi_data)
+        obs.script_log(obs.LOG_INFO, f"Converted OpenAPI data: speed={ogc_input.get('ball_speed_meters_per_second', 'N/A')}")
+    elif "open_golf_coach" in openapi_data:
+        # Already processed, return as-is
+        return openapi_data
+    else:
+        ogc_input = openapi_data
+
+    if not ogc_input:
+        return None
+
+    # Calculate derived values using opengolfcoach library
+    if HAS_OGC:
+        try:
+            result_json = opengolfcoach.calculate_derived_values(json.dumps(ogc_input))
+            result = json.loads(result_json)
+            obs.script_log(obs.LOG_INFO, f"Calculated: {result.get('open_golf_coach', {}).get('shot_name', 'N/A')}")
+            return result
+        except Exception as e:
+            obs.script_log(obs.LOG_WARNING, f"OGC calculation error: {e}")
+            return ogc_input
+    else:
+        obs.script_log(obs.LOG_WARNING, "opengolfcoach not installed - showing raw data only")
+        return ogc_input
 
 # =============================================================================
 # JSON Data Extraction
@@ -103,7 +189,6 @@ def format_data_point(key: str, data: dict) -> Optional[str]:
     except (ValueError, TypeError):
         formatted_value = str(value)
 
-    # Build display string
     parts = []
     if state.show_labels:
         parts.append(f"{label}:")
@@ -118,14 +203,12 @@ def format_data_point(key: str, data: dict) -> Optional[str]:
 # =============================================================================
 
 def get_source_name(key: str) -> str:
-    """Get the OBS source name for a data point key."""
     return f"{SOURCE_PREFIX}{key}"
 
 def create_text_source(key: str, initial_text: str = "---") -> bool:
     """Create a text source and add it to the current scene."""
     source_name = get_source_name(key)
 
-    # Check if source already exists
     existing_source = obs.obs_get_source_by_name(source_name)
     if existing_source:
         obs.obs_source_release(existing_source)
@@ -133,7 +216,6 @@ def create_text_source(key: str, initial_text: str = "---") -> bool:
         state.created_sources.add(source_name)
         return True
 
-    # Get current scene
     current_scene = obs.obs_frontend_get_current_scene()
     if not current_scene:
         obs.script_log(obs.LOG_WARNING, "No scene available - please select a scene first")
@@ -145,18 +227,15 @@ def create_text_source(key: str, initial_text: str = "---") -> bool:
         obs.script_log(obs.LOG_WARNING, "Could not get scene object")
         return False
 
-    # Create settings for text source
     settings = obs.obs_data_create()
     obs.obs_data_set_string(settings, "text", initial_text)
 
-    # Font settings - use simple approach that works across OBS versions
     font_obj = obs.obs_data_create()
     obs.obs_data_set_string(font_obj, "face", "Arial")
     obs.obs_data_set_int(font_obj, "size", 48)
     obs.obs_data_set_obj(settings, "font", font_obj)
     obs.obs_data_release(font_obj)
 
-    # Try different text source types (OBS version compatibility)
     source = None
     for source_type in ["text_gdiplus", "text_gdiplus_v2", "text_gdiplus_v3"]:
         source = obs.obs_source_create(source_type, source_name, settings, None)
@@ -167,20 +246,18 @@ def create_text_source(key: str, initial_text: str = "---") -> bool:
     obs.obs_data_release(settings)
 
     if not source:
-        obs.script_log(obs.LOG_ERROR, f"Failed to create text source (tried all types): {source_name}")
+        obs.script_log(obs.LOG_ERROR, f"Failed to create text source: {source_name}")
         obs.obs_source_release(current_scene)
         return False
 
-    # Add source to scene
     scene_item = obs.obs_scene_add(scene, source)
     if scene_item:
-        # Position sources in a column
         pos = obs.vec2()
         idx = list(DATA_POINTS.keys()).index(key) if key in DATA_POINTS else 0
         pos.x = 50
         pos.y = 50 + (idx * 70)
         obs.obs_sceneitem_set_pos(scene_item, pos)
-        obs.script_log(obs.LOG_INFO, f"SUCCESS: Added {source_name} to scene at ({pos.x}, {pos.y})")
+        obs.script_log(obs.LOG_INFO, f"SUCCESS: Added {source_name} to scene")
         state.created_sources.add(source_name)
     else:
         obs.script_log(obs.LOG_ERROR, f"FAILED: Could not add {source_name} to scene")
@@ -190,10 +267,8 @@ def create_text_source(key: str, initial_text: str = "---") -> bool:
     return scene_item is not None
 
 def update_text_source(key: str, text: str):
-    """Update the text content of a source."""
     source_name = get_source_name(key)
     source = obs.obs_get_source_by_name(source_name)
-
     if source:
         settings = obs.obs_data_create()
         obs.obs_data_set_string(settings, "text", text)
@@ -202,17 +277,14 @@ def update_text_source(key: str, text: str):
         obs.obs_source_release(source)
 
 def update_all_sources(data: dict):
-    """Update all enabled sources with new data."""
     for key in DATA_POINTS.keys():
         if not state.enabled_sources.get(key, False):
             continue
-
         formatted = format_data_point(key, data)
         if formatted:
             update_text_source(key, formatted)
 
 def create_all_sources():
-    """Create all enabled text sources."""
     created_count = 0
     for key in DATA_POINTS.keys():
         if state.enabled_sources.get(key, False):
@@ -221,47 +293,85 @@ def create_all_sources():
     return created_count
 
 # =============================================================================
-# Network Server
+# Network Server - OpenAPI Protocol
 # =============================================================================
 
 def handle_client(client_socket: socket.socket, address):
-    """Handle incoming client connection."""
-    obs.script_log(obs.LOG_INFO, f"Client connected: {address}")
-    buffer = ""
+    """Handle Nova connection with OpenAPI protocol."""
+    obs.script_log(obs.LOG_INFO, f"Nova connected: {address}")
 
     try:
+        # Send OpenAPI handshake immediately
+        handshake = OPENAPI_HANDSHAKE + "\n"
+        client_socket.sendall(handshake.encode('utf-8'))
+        obs.script_log(obs.LOG_INFO, f"Sent handshake to {address}")
+
+        # Keep connection alive for multiple shots
+        buffer = b""
         while state.running:
             try:
                 client_socket.settimeout(1.0)
-                data = client_socket.recv(4096)
+                chunk = client_socket.recv(4096)
             except socket.timeout:
                 continue
 
-            if not data:
+            if not chunk:
+                obs.script_log(obs.LOG_INFO, f"Nova disconnected: {address}")
                 break
 
-            buffer += data.decode('utf-8')
+            buffer += chunk
 
-            # Process complete JSON messages (newline-delimited)
-            while '\n' in buffer:
-                line, buffer = buffer.split('\n', 1)
-                line = line.strip()
-                if line:
-                    try:
-                        json_data = json.loads(line)
-                        state.data_queue.put(json_data)
-                        obs.script_log(obs.LOG_INFO, "Received shot data")
-                    except json.JSONDecodeError as e:
-                        obs.script_log(obs.LOG_WARNING, f"Invalid JSON: {e}")
+            # Try to parse complete JSON messages
+            while buffer:
+                # Try to decode and parse
+                try:
+                    text = buffer.decode('utf-8')
+                except UnicodeDecodeError:
+                    break
+
+                text = text.strip()
+                if not text:
+                    buffer = b""
+                    break
+
+                # Try to parse as JSON
+                try:
+                    data = json.loads(text)
+                    buffer = b""  # Clear buffer on successful parse
+
+                    obs.script_log(obs.LOG_INFO, f"Received shot data from Nova")
+
+                    # Process the shot
+                    processed = process_shot(data)
+                    if processed:
+                        state.data_queue.put(processed)
+
+                except json.JSONDecodeError:
+                    # Check for newline-delimited messages
+                    if b'\n' in buffer:
+                        line, buffer = buffer.split(b'\n', 1)
+                        try:
+                            text = line.decode('utf-8').strip()
+                            if text:
+                                data = json.loads(text)
+                                obs.script_log(obs.LOG_INFO, f"Received shot data from Nova")
+                                processed = process_shot(data)
+                                if processed:
+                                    state.data_queue.put(processed)
+                        except (json.JSONDecodeError, UnicodeDecodeError):
+                            pass
+                    else:
+                        break  # Wait for more data
+
     except Exception as e:
         obs.script_log(obs.LOG_WARNING, f"Client error: {e}")
     finally:
         client_socket.close()
-        obs.script_log(obs.LOG_INFO, f"Client disconnected: {address}")
+        obs.script_log(obs.LOG_INFO, f"Connection closed: {address}")
 
 def server_thread_func():
-    """Main server thread function."""
-    obs.script_log(obs.LOG_INFO, f"Starting server on {state.host}:{state.port}")
+    """Main server thread."""
+    obs.script_log(obs.LOG_INFO, f"Starting OpenAPI server on port {state.port}")
 
     try:
         state.server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -270,7 +380,7 @@ def server_thread_func():
         state.server_socket.listen(5)
         state.server_socket.settimeout(1.0)
 
-        obs.script_log(obs.LOG_INFO, f"Server listening on port {state.port}")
+        obs.script_log(obs.LOG_INFO, f"Waiting for Nova on port {state.port}...")
 
         while state.running:
             try:
@@ -295,16 +405,13 @@ def server_thread_func():
         obs.script_log(obs.LOG_INFO, "Server stopped")
 
 def start_server():
-    """Start the TCP server."""
     if state.running:
         return
-
     state.running = True
     state.server_thread = threading.Thread(target=server_thread_func, daemon=True)
     state.server_thread.start()
 
 def stop_server():
-    """Stop the TCP server."""
     state.running = False
     if state.server_socket:
         try:
@@ -320,32 +427,26 @@ def stop_server():
 # =============================================================================
 
 def script_description():
-    """Return the script description shown in OBS."""
-    return """<h2>Open Golf Coach OBS Plugin</h2>
-<p>Displays golf shot data as individual moveable text sources.</p>
+    ogc_status = "installed" if HAS_OGC else "NOT INSTALLED - run: pip install opengolfcoach"
+    return f"""<h2>Open Golf Coach OBS Plugin</h2>
+<p>Receives shot data directly from Nova launch monitor.</p>
+<p><b>opengolfcoach library:</b> {ogc_status}</p>
 <p><b>Setup:</b></p>
 <ol>
-<li>Click "Create All Sources" to generate text sources in your current scene</li>
-<li>Position the sources where you want them on your stream</li>
-<li>Run the OpenAPI service: <code>python ogc_openapi_service.py</code></li>
-<li>Connect your launch monitor (Nova) to port 921</li>
+<li>Click "Create All Sources" to add text sources to your scene</li>
+<li>Configure Nova to connect to this PC on port 921</li>
+<li>Take shots!</li>
 </ol>
-<p>The OpenAPI service processes data and sends it to this plugin on port 9211.</p>
 """
 
 def script_properties():
-    """Define the properties/settings UI for the script."""
     props = obs.obs_properties_create()
 
-    # Server settings
-    obs.obs_properties_add_int(props, "port", "Listening Port", 1, 65535, 1)
+    obs.obs_properties_add_int(props, "port", "Listening Port (for Nova)", 1, 65535, 1)
+    obs.obs_properties_add_bool(props, "show_labels", "Show Labels")
+    obs.obs_properties_add_bool(props, "show_units", "Show Units")
 
-    # Display settings
-    obs.obs_properties_add_bool(props, "show_labels", "Show Labels (e.g., 'Carry:')")
-    obs.obs_properties_add_bool(props, "show_units", "Show Units (e.g., 'yds')")
-
-    # Data point toggles
-    p = obs.obs_properties_add_bool(props, "enable_ball_speed", "Ball Speed")
+    obs.obs_properties_add_bool(props, "enable_ball_speed", "Ball Speed")
     obs.obs_properties_add_bool(props, "enable_launch_angle", "Launch Angle")
     obs.obs_properties_add_bool(props, "enable_total_spin", "Total Spin")
     obs.obs_properties_add_bool(props, "enable_carry", "Carry Distance")
@@ -358,33 +459,26 @@ def script_properties():
     obs.obs_properties_add_bool(props, "enable_shot_name", "Shot Shape")
     obs.obs_properties_add_bool(props, "enable_shot_rank", "Shot Grade")
 
-    # Action buttons
     obs.obs_properties_add_button(props, "create_sources_btn", "Create All Sources", create_sources_clicked)
     obs.obs_properties_add_button(props, "test_data_btn", "Test with Sample Data", send_test_data_clicked)
 
     return props
 
 def script_defaults(settings):
-    """Set default values for script settings."""
     obs.obs_data_set_default_int(settings, "port", DEFAULT_PORT)
     obs.obs_data_set_default_bool(settings, "show_labels", True)
     obs.obs_data_set_default_bool(settings, "show_units", True)
-
-    # Enable all data points by default
     for key in DATA_POINTS.keys():
         obs.obs_data_set_default_bool(settings, f"enable_{key}", True)
 
 def script_update(settings):
-    """Called when settings are changed."""
     new_port = obs.obs_data_get_int(settings, "port")
     state.show_labels = obs.obs_data_get_bool(settings, "show_labels")
     state.show_units = obs.obs_data_get_bool(settings, "show_units")
 
-    # Update enabled sources
     for key in DATA_POINTS.keys():
         state.enabled_sources[key] = obs.obs_data_get_bool(settings, f"enable_{key}")
 
-    # Restart server if port changed
     if new_port != state.port:
         state.port = new_port
         if state.running:
@@ -392,42 +486,39 @@ def script_update(settings):
             start_server()
 
 def script_load(settings):
-    """Called when the script is loaded."""
     obs.script_log(obs.LOG_INFO, "Open Golf Coach Plugin loaded")
+    if HAS_OGC:
+        obs.script_log(obs.LOG_INFO, "opengolfcoach library available")
+    else:
+        obs.script_log(obs.LOG_WARNING, "opengolfcoach NOT installed - pip install opengolfcoach")
     script_update(settings)
     start_server()
-
-    # Register timer for processing queue
     obs.timer_add(process_data_queue, 100)
 
 def script_unload():
-    """Called when the script is unloaded."""
     obs.timer_remove(process_data_queue)
     stop_server()
     obs.script_log(obs.LOG_INFO, "Open Golf Coach Plugin unloaded")
 
 # =============================================================================
-# Callbacks and Helpers
+# Callbacks
 # =============================================================================
 
 def process_data_queue():
-    """Process any pending data in the queue (called from main thread)."""
     try:
         while not state.data_queue.empty():
             data = state.data_queue.get_nowait()
             state.current_data = data
             update_all_sources(data)
-    except queue.Empty:
+    except:
         pass
 
 def create_sources_clicked(props, prop):
-    """Button callback to create all sources."""
     count = create_all_sources()
     obs.script_log(obs.LOG_INFO, f"Created {count} sources")
     return True
 
 def send_test_data_clicked(props, prop):
-    """Button callback to send test data."""
     test_data = {
         "ball_speed_meters_per_second": 70.0,
         "vertical_launch_angle_degrees": 12.5,
@@ -454,5 +545,5 @@ def send_test_data_clicked(props, prop):
         }
     }
     state.data_queue.put(test_data)
-    obs.script_log(obs.LOG_INFO, "Test data queued - sources should update")
+    obs.script_log(obs.LOG_INFO, "Test data queued")
     return True
