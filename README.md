@@ -3,7 +3,7 @@
 Display real-time golf shot data from Nova launch monitor directly in OBS Studio. Each data point appears as a separate, moveable text source.
 
 
-![OBS Open Golf Coach Screenshot](images/screenshot.png)
+![OBS Open Golf Coach Screenshot](OGC.png)
 
 ## Requirements
 
