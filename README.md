@@ -74,10 +74,6 @@ OBS Text Sources (moveable)
 - Install with `pip install opengolfcoach`
 - Make sure you're using the same Python that OBS is configured to use
 
-**Nova won't connect:**
-- Check Windows Firewall allows port 921
-- Verify Nova is configured with correct IP and port
-
 **Connection drops after one shot:**
 - Update to the latest script version (implements keep-alive)
 
