@@ -3,6 +3,8 @@
 Display real-time golf shot data from Nova launch monitor directly in OBS Studio. Each data point appears as a separate, moveable text source.
 
 
+![OBS Open Golf Coach Screenshot](images/screenshot.png)
+
 ## Requirements
 
 - **OBS Studio** with Python scripting enabled
@@ -22,7 +24,9 @@ pip install opengolfcoach
 ### 2. Add the OBS Script
 
 1. Open **OBS Studio** → `Tools` → `Scripts`
-2. Click `Python Settings` tab → set your Python path
+2. Click `Python Settings` tab → set your Python path:
+   - Windows: `C:\Users\<username>\AppData\Local\Programs\Python\Python311`
+   - Or if installed for all users: `C:\Program Files\Python311`
 3. Click `+` → select `obs_open_golf_coach.py`
 
 ### 3. Create Sources
