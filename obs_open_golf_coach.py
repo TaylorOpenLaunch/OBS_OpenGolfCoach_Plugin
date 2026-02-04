@@ -41,6 +41,7 @@ DATA_POINTS = {
     # Input metrics (Imperial)
     "ball_speed": ("open_golf_coach.us_customary_units.ball_speed_mph", "Ball Speed", "{:.1f}", "mph"),
     "launch_angle": ("vertical_launch_angle_degrees", "Launch Angle", "{:.1f}", "°"),
+    "launch_direction": ("horizontal_launch_angle_degrees", "Launch Dir", "{:+.1f}", "°"),
     "total_spin": ("total_spin_rpm", "Total Spin", "{:.0f}", "rpm"),
 
     # Calculated metrics (Imperial)
@@ -447,7 +448,8 @@ def script_properties():
     obs.obs_properties_add_bool(props, "show_units", "Show Units")
 
     obs.obs_properties_add_bool(props, "enable_ball_speed", "Ball Speed")
-    obs.obs_properties_add_bool(props, "enable_launch_angle", "Launch Angle")
+    obs.obs_properties_add_bool(props, "enable_launch_angle", "Launch Angle (vertical)")
+    obs.obs_properties_add_bool(props, "enable_launch_direction", "Launch Direction (horizontal)")
     obs.obs_properties_add_bool(props, "enable_total_spin", "Total Spin")
     obs.obs_properties_add_bool(props, "enable_carry", "Carry Distance")
     obs.obs_properties_add_bool(props, "enable_total", "Total Distance")
