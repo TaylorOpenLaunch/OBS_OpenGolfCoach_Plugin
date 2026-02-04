@@ -7,7 +7,7 @@ Display real-time golf shot data from Nova launch monitor directly in OBS Studio
 ## Requirements
 
 - **OBS Studio** with Python scripting enabled
-- **Python 3.10+** configured in OBS
+- **Python 3.10+** - [Download Python](https://www.python.org/downloads/) (use 3.11 for best OBS compatibility)
 - **opengolfcoach** pip package (for calculating carry, shot shape, etc.)
 
 ## Quick Start
@@ -31,14 +31,6 @@ pip install opengolfcoach
 1. Select a scene in OBS
 2. Click **"Create All Sources"** in the script settings
 3. Position the `OGC_` sources on your stream
-
-### 4. Connect Nova
-
-Configure Nova to connect to:
-- **Host**: Your PC's IP (or `127.0.0.1` if same machine)
-- **Port**: `921`
-
-When Nova connects, you'll see "Nova connected" in the OBS script log.
 
 ## How It Works
 
@@ -65,6 +57,7 @@ OBS Text Sources (moveable)
 |--------|-------------|
 | OGC_ball_speed | Ball speed (mph) |
 | OGC_launch_angle | Launch angle (°) |
+| OGC_launch_direction | Launch direction (°) |
 | OGC_total_spin | Spin rate (rpm) |
 | OGC_carry | Carry distance (yds) |
 | OGC_total | Total distance (yds) |
