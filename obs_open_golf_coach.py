@@ -1,8 +1,12 @@
 """
 OBS Open Golf Coach Plugin
 ==========================
-Receives golf shot data from Open Golf Coach via WebSocket/TCP and displays
-each data point as a separate, moveable text source in OBS.
+Receives golf shot data and displays each data point as a separate,
+moveable text source in OBS.
+
+This plugin can work in two modes:
+1. Standalone: Receives processed OGC JSON data
+2. With OpenAPI service: Receives data from ogc_openapi_service.py
 
 Author: Open Golf Coach Community
 License: MIT
@@ -13,7 +17,6 @@ import json
 import socket
 import threading
 import queue
-from dataclasses import dataclass
 from typing import Optional, Dict, Any
 import time
 
@@ -21,60 +24,51 @@ import time
 # Configuration
 # =============================================================================
 
-# Default settings
-DEFAULT_PORT = 921
+DEFAULT_PORT = 9211  # Port for receiving processed OGC data
 DEFAULT_HOST = "0.0.0.0"
 SOURCE_PREFIX = "OGC_"
 
 # Data point definitions: (json_path, display_name, format_string, unit)
 DATA_POINTS = {
-    # Input metrics
-    "ball_speed_mph": ("us_customary_units.ball_speed_mph", "Ball Speed", "{:.1f}", "mph"),
-    "ball_speed_mps": ("ball_speed_meters_per_second", "Ball Speed", "{:.1f}", "m/s"),
-    "launch_angle_v": ("vertical_launch_angle_degrees", "Launch Angle", "{:.1f}", "°"),
-    "launch_angle_h": ("horizontal_launch_angle_degrees", "Horizontal Angle", "{:.1f}", "°"),
+    # Input metrics (Imperial)
+    "ball_speed": ("open_golf_coach.us_customary_units.ball_speed_mph", "Ball Speed", "{:.1f}", "mph"),
+    "launch_angle": ("vertical_launch_angle_degrees", "Launch Angle", "{:.1f}", "°"),
     "total_spin": ("total_spin_rpm", "Total Spin", "{:.0f}", "rpm"),
-    "spin_axis": ("spin_axis_degrees", "Spin Axis", "{:.1f}", "°"),
 
-    # Calculated metrics (from open_golf_coach key)
-    "carry_yards": ("open_golf_coach.us_customary_units.carry_distance_yards", "Carry Distance", "{:.1f}", "yds"),
-    "carry_meters": ("open_golf_coach.carry_distance_meters", "Carry Distance", "{:.1f}", "m"),
-    "total_yards": ("open_golf_coach.us_customary_units.total_distance_yards", "Total Distance", "{:.1f}", "yds"),
-    "total_meters": ("open_golf_coach.total_distance_meters", "Total Distance", "{:.1f}", "m"),
-    "offline_yards": ("open_golf_coach.us_customary_units.offline_distance_yards", "Offline", "{:+.1f}", "yds"),
-    "offline_meters": ("open_golf_coach.offline_distance_meters", "Offline", "{:+.1f}", "m"),
-    "peak_height_yards": ("open_golf_coach.us_customary_units.peak_height_yards", "Peak Height", "{:.1f}", "yds"),
-    "peak_height_meters": ("open_golf_coach.peak_height_meters", "Peak Height", "{:.1f}", "m"),
+    # Calculated metrics (Imperial)
+    "carry": ("open_golf_coach.us_customary_units.carry_distance_yards", "Carry", "{:.1f}", "yds"),
+    "total": ("open_golf_coach.us_customary_units.total_distance_yards", "Total", "{:.1f}", "yds"),
+    "offline": ("open_golf_coach.us_customary_units.offline_distance_yards", "Offline", "{:+.1f}", "yds"),
+    "peak_height": ("open_golf_coach.us_customary_units.peak_height_yards", "Peak Height", "{:.1f}", "yds"),
     "hang_time": ("open_golf_coach.hang_time_seconds", "Hang Time", "{:.2f}", "s"),
+
+    # Spin breakdown
     "backspin": ("open_golf_coach.backspin_rpm", "Backspin", "{:.0f}", "rpm"),
     "sidespin": ("open_golf_coach.sidespin_rpm", "Sidespin", "{:+.0f}", "rpm"),
-    "shot_name": ("open_golf_coach.shot_name", "Shot Shape", "{}", ""),
-    "shot_rank": ("open_golf_coach.shot_rank", "Shot Grade", "{}", ""),
+
+    # Shot classification
+    "shot_name": ("open_golf_coach.shot_name", "Shot", "{}", ""),
+    "shot_rank": ("open_golf_coach.shot_rank", "Grade", "{}", ""),
 }
 
 # =============================================================================
 # Global State
 # =============================================================================
 
-@dataclass
 class PluginState:
     """Holds the global state of the plugin."""
-    server_thread: Optional[threading.Thread] = None
-    server_socket: Optional[socket.socket] = None
-    running: bool = False
-    data_queue: queue.Queue = None
-    current_data: Dict[str, Any] = None
-    enabled_sources: Dict[str, bool] = None
-    port: int = DEFAULT_PORT
-    host: str = DEFAULT_HOST
-    show_units: bool = True
-    show_labels: bool = True
-    use_imperial: bool = True
-
-    def __post_init__(self):
-        self.data_queue = queue.Queue()
-        self.current_data = {}
-        self.enabled_sources = {key: True for key in DATA_POINTS.keys()}
+    def __init__(self):
+        self.server_thread: Optional[threading.Thread] = None
+        self.server_socket: Optional[socket.socket] = None
+        self.running: bool = False
+        self.data_queue: queue.Queue = queue.Queue()
+        self.current_data: Dict[str, Any] = {}
+        self.enabled_sources: Dict[str, bool] = {key: True for key in DATA_POINTS.keys()}
+        self.port: int = DEFAULT_PORT
+        self.host: str = DEFAULT_HOST
+        self.show_units: bool = True
+        self.show_labels: bool = True
+        self.created_sources: set = set()
 
 state = PluginState()
 
@@ -127,31 +121,74 @@ def get_source_name(key: str) -> str:
     """Get the OBS source name for a data point key."""
     return f"{SOURCE_PREFIX}{key}"
 
-def create_text_source(key: str) -> bool:
-    """Create a text source for a data point if it doesn't exist."""
+def get_current_scene():
+    """Get the current scene source."""
+    current_scene = obs.obs_frontend_get_current_scene()
+    return current_scene
+
+def create_text_source(key: str, initial_text: str = "---") -> bool:
+    """Create a text source and add it to the current scene."""
     source_name = get_source_name(key)
 
     # Check if source already exists
-    source = obs.obs_get_source_by_name(source_name)
-    if source:
-        obs.obs_source_release(source)
+    existing_source = obs.obs_get_source_by_name(source_name)
+    if existing_source:
+        obs.obs_source_release(existing_source)
+        obs.script_log(obs.LOG_INFO, f"Source already exists: {source_name}")
+        state.created_sources.add(source_name)
         return True
 
-    # Create new text source
-    settings = obs.obs_data_create()
-    obs.obs_data_set_string(settings, "text", "Waiting for data...")
+    # Get current scene
+    current_scene = get_current_scene()
+    if not current_scene:
+        obs.script_log(obs.LOG_WARNING, "No scene available to add source to")
+        return False
 
-    # Create the source
-    source = obs.obs_source_create("text_gdiplus", source_name, settings, None)
+    scene = obs.obs_scene_from_source(current_scene)
+    if not scene:
+        obs.obs_source_release(current_scene)
+        obs.script_log(obs.LOG_WARNING, "Could not get scene from source")
+        return False
+
+    # Create settings for text source
+    settings = obs.obs_data_create()
+    obs.obs_data_set_string(settings, "text", initial_text)
+
+    # Font settings for better visibility
+    font = obs.obs_data_create()
+    obs.obs_data_set_string(font, "face", "Arial")
+    obs.obs_data_set_int(font, "size", 48)
+    obs.obs_data_set_int(font, "flags", 0)  # 0 = normal, 1 = bold
+    obs.obs_data_set_obj(settings, "font", font)
+    obs.obs_data_release(font)
+
+    # Color settings (white text)
+    obs.obs_data_set_int(settings, "color", 0xFFFFFFFF)
+
+    # Create the text source (use text_gdiplus_v2 for Windows)
+    source = obs.obs_source_create("text_gdiplus_v2", source_name, settings, None)
     obs.obs_data_release(settings)
 
     if source:
+        # Add source to scene
+        scene_item = obs.obs_scene_add(scene, source)
+        if scene_item:
+            # Position sources in a column
+            pos = obs.vec2()
+            idx = list(DATA_POINTS.keys()).index(key) if key in DATA_POINTS else 0
+            pos.x = 50
+            pos.y = 50 + (idx * 60)
+            obs.obs_sceneitem_set_pos(scene_item, pos)
+            obs.script_log(obs.LOG_INFO, f"Created and added source: {source_name}")
+            state.created_sources.add(source_name)
+        else:
+            obs.script_log(obs.LOG_WARNING, f"Failed to add source to scene: {source_name}")
         obs.obs_source_release(source)
-        obs.script_log(obs.LOG_INFO, f"Created source: {source_name}")
-        return True
+    else:
+        obs.script_log(obs.LOG_WARNING, f"Failed to create source: {source_name}")
 
-    obs.script_log(obs.LOG_WARNING, f"Failed to create source: {source_name}")
-    return False
+    obs.obs_source_release(current_scene)
+    return source is not None
 
 def update_text_source(key: str, text: str):
     """Update the text content of a source."""
@@ -171,30 +208,18 @@ def update_all_sources(data: dict):
         if not state.enabled_sources.get(key, False):
             continue
 
-        # Filter based on unit preference
-        if state.use_imperial:
-            if key.endswith('_meters') or key.endswith('_mps'):
-                continue
-        else:
-            if key.endswith('_yards') or key.endswith('_mph'):
-                continue
-
         formatted = format_data_point(key, data)
         if formatted:
             update_text_source(key, formatted)
 
 def create_all_sources():
     """Create all enabled text sources."""
+    created_count = 0
     for key in DATA_POINTS.keys():
         if state.enabled_sources.get(key, False):
-            # Filter based on unit preference
-            if state.use_imperial:
-                if key.endswith('_meters') or key.endswith('_mps'):
-                    continue
-            else:
-                if key.endswith('_yards') or key.endswith('_mph'):
-                    continue
-            create_text_source(key)
+            if create_text_source(key, "---"):
+                created_count += 1
+    return created_count
 
 # =============================================================================
 # Network Server
@@ -207,7 +232,12 @@ def handle_client(client_socket: socket.socket, address):
 
     try:
         while state.running:
-            data = client_socket.recv(4096)
+            try:
+                client_socket.settimeout(1.0)
+                data = client_socket.recv(4096)
+            except socket.timeout:
+                continue
+
             if not data:
                 break
 
@@ -221,7 +251,7 @@ def handle_client(client_socket: socket.socket, address):
                     try:
                         json_data = json.loads(line)
                         state.data_queue.put(json_data)
-                        obs.script_log(obs.LOG_DEBUG, f"Received shot data")
+                        obs.script_log(obs.LOG_INFO, "Received shot data")
                     except json.JSONDecodeError as e:
                         obs.script_log(obs.LOG_WARNING, f"Invalid JSON: {e}")
     except Exception as e:
@@ -292,18 +322,16 @@ def stop_server():
 
 def script_description():
     """Return the script description shown in OBS."""
-    return """<h2>Open Golf Coach Plugin</h2>
-<p>Displays golf shot data from Open Golf Coach as individual text sources.</p>
-<p>Each data point (ball speed, carry distance, spin, etc.) appears as a
-separate, moveable text element that you can position anywhere on your stream.</p>
-<p><b>Usage:</b></p>
+    return """<h2>Open Golf Coach OBS Plugin</h2>
+<p>Displays golf shot data as individual moveable text sources.</p>
+<p><b>Setup:</b></p>
 <ol>
-<li>Configure the listening port (default: 921)</li>
-<li>Click "Create Sources" to generate text sources</li>
-<li>Add the sources to your scene and position them</li>
-<li>Send data from Open Golf Coach to this port</li>
+<li>Click "Create All Sources" to generate text sources in your current scene</li>
+<li>Position the sources where you want them on your stream</li>
+<li>Run the OpenAPI service: <code>python ogc_openapi_service.py</code></li>
+<li>Connect your launch monitor (Nova) to port 921</li>
 </ol>
-<p>Data format: JSON objects, one per line (newline-delimited)</p>
+<p>The OpenAPI service processes data and sends it to this plugin on port 9211.</p>
 """
 
 def script_properties():
@@ -314,38 +342,26 @@ def script_properties():
     obs.obs_properties_add_int(props, "port", "Listening Port", 1, 65535, 1)
 
     # Display settings
-    obs.obs_properties_add_bool(props, "show_labels", "Show Labels")
-    obs.obs_properties_add_bool(props, "show_units", "Show Units")
-    obs.obs_properties_add_bool(props, "use_imperial", "Use Imperial Units (yards/mph)")
+    obs.obs_properties_add_bool(props, "show_labels", "Show Labels (e.g., 'Carry:')")
+    obs.obs_properties_add_bool(props, "show_units", "Show Units (e.g., 'yds')")
 
     # Data point toggles
-    obs.obs_properties_add_text(props, "separator1", "─── Enable/Disable Data Points ───", obs.OBS_TEXT_INFO)
-
-    # Group: Input metrics
-    obs.obs_properties_add_bool(props, "enable_ball_speed_mph", "Ball Speed (mph)")
-    obs.obs_properties_add_bool(props, "enable_launch_angle_v", "Launch Angle (vertical)")
-    obs.obs_properties_add_bool(props, "enable_launch_angle_h", "Launch Angle (horizontal)")
+    p = obs.obs_properties_add_bool(props, "enable_ball_speed", "Ball Speed")
+    obs.obs_properties_add_bool(props, "enable_launch_angle", "Launch Angle")
     obs.obs_properties_add_bool(props, "enable_total_spin", "Total Spin")
-    obs.obs_properties_add_bool(props, "enable_spin_axis", "Spin Axis")
-
-    # Group: Distance metrics
-    obs.obs_properties_add_bool(props, "enable_carry_yards", "Carry Distance")
-    obs.obs_properties_add_bool(props, "enable_total_yards", "Total Distance")
-    obs.obs_properties_add_bool(props, "enable_offline_yards", "Offline Distance")
-    obs.obs_properties_add_bool(props, "enable_peak_height_yards", "Peak Height")
+    obs.obs_properties_add_bool(props, "enable_carry", "Carry Distance")
+    obs.obs_properties_add_bool(props, "enable_total", "Total Distance")
+    obs.obs_properties_add_bool(props, "enable_offline", "Offline Distance")
+    obs.obs_properties_add_bool(props, "enable_peak_height", "Peak Height")
     obs.obs_properties_add_bool(props, "enable_hang_time", "Hang Time")
-
-    # Group: Spin breakdown
     obs.obs_properties_add_bool(props, "enable_backspin", "Backspin")
     obs.obs_properties_add_bool(props, "enable_sidespin", "Sidespin")
-
-    # Group: Shot classification
     obs.obs_properties_add_bool(props, "enable_shot_name", "Shot Shape")
     obs.obs_properties_add_bool(props, "enable_shot_rank", "Shot Grade")
 
     # Action buttons
-    obs.obs_properties_add_button(props, "create_sources_btn", "Create Sources", create_sources_clicked)
-    obs.obs_properties_add_button(props, "test_data_btn", "Send Test Data", send_test_data_clicked)
+    obs.obs_properties_add_button(props, "create_sources_btn", "Create All Sources", create_sources_clicked)
+    obs.obs_properties_add_button(props, "test_data_btn", "Test with Sample Data", send_test_data_clicked)
 
     return props
 
@@ -354,7 +370,6 @@ def script_defaults(settings):
     obs.obs_data_set_default_int(settings, "port", DEFAULT_PORT)
     obs.obs_data_set_default_bool(settings, "show_labels", True)
     obs.obs_data_set_default_bool(settings, "show_units", True)
-    obs.obs_data_set_default_bool(settings, "use_imperial", True)
 
     # Enable all data points by default
     for key in DATA_POINTS.keys():
@@ -362,19 +377,20 @@ def script_defaults(settings):
 
 def script_update(settings):
     """Called when settings are changed."""
-    state.port = obs.obs_data_get_int(settings, "port")
+    new_port = obs.obs_data_get_int(settings, "port")
     state.show_labels = obs.obs_data_get_bool(settings, "show_labels")
     state.show_units = obs.obs_data_get_bool(settings, "show_units")
-    state.use_imperial = obs.obs_data_get_bool(settings, "use_imperial")
 
     # Update enabled sources
     for key in DATA_POINTS.keys():
         state.enabled_sources[key] = obs.obs_data_get_bool(settings, f"enable_{key}")
 
     # Restart server if port changed
-    if state.running:
-        stop_server()
-        start_server()
+    if new_port != state.port:
+        state.port = new_port
+        if state.running:
+            stop_server()
+            start_server()
 
 def script_load(settings):
     """Called when the script is loaded."""
@@ -407,8 +423,8 @@ def process_data_queue():
 
 def create_sources_clicked(props, prop):
     """Button callback to create all sources."""
-    create_all_sources()
-    obs.script_log(obs.LOG_INFO, "Sources created")
+    count = create_all_sources()
+    obs.script_log(obs.LOG_INFO, f"Created {count} sources")
     return True
 
 def send_test_data_clicked(props, prop):
@@ -436,11 +452,8 @@ def send_test_data_clicked(props, prop):
                 "offline_distance_yards": -6.8,
                 "peak_height_yards": 31.2
             }
-        },
-        "us_customary_units": {
-            "ball_speed_mph": 156.6
         }
     }
     state.data_queue.put(test_data)
-    obs.script_log(obs.LOG_INFO, "Test data sent")
+    obs.script_log(obs.LOG_INFO, "Test data queued - sources should update")
     return True

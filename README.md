@@ -1,15 +1,30 @@
 # OBS Open Golf Coach Plugin
 
-Display real-time golf shot data from [Open Golf Coach](https://github.com/OpenLaunchLabs/open-golf-coach) in OBS Studio. Each data point (ball speed, carry distance, spin, shot shape, etc.) appears as a separate, moveable text source that you can position anywhere on your stream.
+Display real-time golf shot data from your launch monitor (Nova, etc.) in OBS Studio. Each data point (ball speed, carry distance, spin, shot shape, etc.) appears as a separate, moveable text source that you can position anywhere on your stream.
+
+## Architecture
+
+```
+┌─────────────────┐      ┌──────────────────────┐      ┌─────────────┐
+│  Launch Monitor │      │  OpenAPI Service     │      │ OBS Studio  │
+│  (Nova)         │─────>│  (ogc_openapi_       │─────>│ Plugin      │
+│                 │ 921  │   service.py)        │ 9211 │             │
+└─────────────────┘      │                      │      └─────────────┘
+                         │  Uses opengolfcoach  │
+                         │  pip package for     │
+                         │  calculations        │
+                         └──────────────────────┘
+```
+
+**Port 921**: OpenAPI protocol (what Nova and launch monitors use)
+**Port 9211**: Internal communication to OBS plugin
 
 ## Features
 
-- **Individual Text Sources**: Each metric (ball speed, carry, spin, etc.) is a separate OBS source you can move, resize, and style independently
-- **Real-time Updates**: Shot data updates instantly when received from Open Golf Coach
-- **Customizable Display**: Show/hide labels, units, and choose between imperial or metric
-- **Two Integration Options**:
-  - **OBS Script**: Runs inside OBS (simpler setup)
-  - **Standalone Service**: Runs as a separate process (more robust)
+- **Individual Text Sources**: Each metric is a separate OBS source you can move, resize, and style independently
+- **Real-time Updates**: Shot data updates instantly when received
+- **OpenAPI Compatible**: Works with Nova and other launch monitors that use the OpenAPI protocol
+- **Headless Processing**: Uses the `opengolfcoach` pip package for all physics calculations
 
 ## Available Data Points
 
@@ -17,9 +32,7 @@ Display real-time golf shot data from [Open Golf Coach](https://github.com/OpenL
 |------------|-------------|---------|
 | Ball Speed | Ball velocity at launch | 156.6 mph |
 | Launch Angle | Vertical launch angle | 12.5° |
-| Horizontal Angle | Side-to-side launch direction | -2.0° |
 | Total Spin | Combined spin rate | 2800 rpm |
-| Spin Axis | Tilt of spin axis | 15° |
 | Carry Distance | Air distance | 202.9 yds |
 | Total Distance | Carry + roll | 213.3 yds |
 | Offline | Left/right deviation | -6.8 yds |
@@ -34,17 +47,23 @@ Display real-time golf shot data from [Open Golf Coach](https://github.com/OpenL
 
 ### Prerequisites
 
-- **OBS Studio 28+** (for WebSocket support)
-- **Python 3.10+** (for Windows, use 3.11 for best OBS compatibility)
-- **Windows 11** (primary target OS)
+- **OBS Studio 28+** (Windows 11)
+- **Python 3.10+** (Python 3.11 recommended for OBS compatibility)
+- **opengolfcoach** pip package
 
-### Option 1: OBS Script (Recommended for Simplicity)
+### Step 1: Install Python Dependencies
+
+```bash
+pip install opengolfcoach
+```
+
+### Step 2: Set Up OBS Script
 
 1. **Download** `obs_open_golf_coach.py` from this repository
 
 2. **Open OBS Studio** and go to `Tools` > `Scripts`
 
-3. **Configure Python**:
+3. **Configure Python** (first time only):
    - Click `Python Settings` tab
    - Set the Python install path (e.g., `C:\Users\YourName\AppData\Local\Programs\Python\Python311`)
 
@@ -52,59 +71,66 @@ Display real-time golf shot data from [Open Golf Coach](https://github.com/OpenL
    - Click the `+` button
    - Select `obs_open_golf_coach.py`
 
-5. **Configure Settings**:
-   - Set the listening port (default: 921)
-   - Enable/disable data points as desired
-   - Click "Create Sources" to generate the text sources
+5. **Create Sources**:
+   - In the script settings, click **"Create All Sources"**
+   - This adds text sources (prefixed with `OGC_`) to your current scene
+   - Position them where you want on your stream
 
-6. **Add Sources to Scene**:
-   - The script creates sources prefixed with `OGC_`
-   - Add them to your scene via `Add` > `Text (GDI+)` > select existing source
+### Step 3: Run the OpenAPI Service
 
-### Option 2: Bridge Service (Recommended for Full Integration)
+Open a terminal and run:
 
-Use this when you have a launch monitor sending raw data that needs processing by Open Golf Coach.
+```bash
+python ogc_openapi_service.py
+```
 
-1. **Install Dependencies**:
-   ```bash
-   pip install obsws-python opengolfcoach
-   ```
+You should see:
+```
+╔═══════════════════════════════════════════════════════════════════╗
+║           Open Golf Coach OpenAPI Service                         ║
+╚═══════════════════════════════════════════════════════════════════╝
 
-2. **Enable OBS WebSocket**:
-   - In OBS, go to `Tools` > `WebSocket Server Settings`
-   - Enable the WebSocket server
-   - Note the port (default: 4455) and password if set
+Configuration:
+  OpenAPI Port (for Nova):    921
+  OBS Plugin Port:            9211
 
-3. **Start Open Golf Coach** (if using TCP mode):
-   - Open Golf Coach should be listening on port 921
+Waiting for launch monitor connection...
+```
 
-4. **Run the Bridge**:
-   ```bash
-   python ogc_bridge.py --listen-port 9210 --ogc-port 921 --obs-port 4455
-   ```
+### Step 4: Connect Your Launch Monitor
 
-5. **Configure your launch monitor** to send data to port 9210
+Configure Nova (or your launch monitor) to connect to:
+- **Host**: `127.0.0.1` (or your PC's IP address)
+- **Port**: `921`
 
-The bridge will:
-- Receive raw launch monitor data on port 9210
-- Send it to Open Golf Coach on port 921 for processing
-- Display the enriched results in OBS
+When Nova connects, you'll see:
+```
+Launch monitor connected: ('127.0.0.1', 54321)
+Sent handshake to ('127.0.0.1', 54321)
+```
 
-### Option 3: Standalone Service (For Pre-processed Data)
+### Step 5: Take Shots!
 
-Use this when your application already produces Open Golf Coach formatted output.
+When you hit a shot, the data flows:
+1. Nova sends shot data to port 921
+2. OpenAPI service processes it with `opengolfcoach`
+3. Results are sent to OBS on port 9211
+4. OBS text sources update with the new values
 
-1. **Install Dependencies**:
-   ```bash
-   pip install obsws-python
-   ```
+## Testing Without a Launch Monitor
 
-2. **Run the Service**:
-   ```bash
-   python ogc_obs_service.py --port 921 --obs-port 4455
-   ```
+Use the included test sender to simulate shots:
 
-The service will create text sources in your current scene automatically.
+```bash
+# Test the full flow (OpenAPI service must be running)
+python test_sender.py
+
+# Send continuous test shots every 5 seconds
+python test_sender.py --continuous
+
+# Test directly to OBS (bypassing OpenAPI service)
+python test_sender.py --direct
+```
 
 ## Configuration
 
@@ -112,160 +138,95 @@ The service will create text sources in your current scene automatically.
 
 | Setting | Description | Default |
 |---------|-------------|---------|
-| Listening Port | TCP port for incoming data | 921 |
-| Show Labels | Display "Ball Speed:", etc. | Yes |
-| Show Units | Display "mph", "yds", etc. | Yes |
-| Use Imperial | Use mph/yards vs m/s/meters | Yes |
+| Listening Port | Port for receiving processed data | 9211 |
+| Show Labels | Display "Carry:", "Total:", etc. | Yes |
+| Show Units | Display "yds", "mph", etc. | Yes |
 
-### Standalone Service Options
+### OpenAPI Service Options
 
 ```bash
-python ogc_obs_service.py --help
+python ogc_openapi_service.py --help
 
 Options:
-  --port PORT           Port to receive golf data (default: 921)
-  --obs-host HOST       OBS WebSocket host (default: localhost)
-  --obs-port PORT       OBS WebSocket port (default: 4455)
-  --obs-password PASS   OBS WebSocket password (if configured)
-  --no-labels           Hide data point labels
-  --no-units            Hide unit suffixes
-  --metric              Use metric units instead of imperial
-  --list-sources        List available data sources and exit
+  --openapi-port PORT   Port for launch monitor (default: 921)
+  --obs-port PORT       Port for OBS plugin (default: 9211)
 ```
 
-## Data Format
+## Files
 
-The plugin expects JSON data in the Open Golf Coach format, sent as newline-delimited JSON over TCP:
-
-```json
-{
-  "ball_speed_meters_per_second": 70.0,
-  "vertical_launch_angle_degrees": 12.5,
-  "horizontal_launch_angle_degrees": -2.0,
-  "total_spin_rpm": 2800.0,
-  "spin_axis_degrees": 15.0,
-  "us_customary_units": {
-    "ball_speed_mph": 156.6
-  },
-  "open_golf_coach": {
-    "carry_distance_meters": 185.4,
-    "total_distance_meters": 195.2,
-    "offline_distance_meters": -6.2,
-    "peak_height_meters": 28.5,
-    "hang_time_seconds": 7.2,
-    "backspin_rpm": 2700.5,
-    "sidespin_rpm": 724.8,
-    "shot_name": "Fade",
-    "shot_rank": "A",
-    "us_customary_units": {
-      "carry_distance_yards": 202.9,
-      "total_distance_yards": 213.3,
-      "offline_distance_yards": -6.8,
-      "peak_height_yards": 31.2
-    }
-  }
-}
-```
-
-## Testing
-
-Use the included test sender to simulate shot data:
-
-```bash
-# Send a single test shot
-python test_sender.py
-
-# Send continuous shots every 5 seconds
-python test_sender.py --continuous
-
-# Specify custom port
-python test_sender.py --port 921
-```
-
-## Integration with Open Golf Coach
-
-### Using the Python Library Directly
-
-You can integrate Open Golf Coach calculations with your launch monitor data:
-
-```python
-import opengolfcoach
-import json
-import socket
-
-# Your launch monitor data
-shot = {
-    "ball_speed_meters_per_second": 70.0,
-    "vertical_launch_angle_degrees": 12.5,
-    "horizontal_launch_angle_degrees": -2.0,
-    "total_spin_rpm": 2800.0,
-    "spin_axis_degrees": 15.0
-}
-
-# Calculate derived metrics
-result_json = opengolfcoach.calculate_derived_values(json.dumps(shot))
-result = json.loads(result_json)
-
-# Send to OBS plugin
-with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
-    sock.connect(("127.0.0.1", 921))
-    sock.sendall((json.dumps(result) + "\n").encode())
-```
-
-### Architecture Diagram
-
-**Option A: Bridge Mode (Recommended)**
-```
-┌─────────────────┐     ┌─────────────┐     ┌──────────────────┐     ┌─────────────┐
-│  Launch Monitor │────>│   Bridge    │────>│  Open Golf Coach │────>│  OBS Studio │
-│  (Hardware)     │     │  (Port 9210)│     │   (Port 921)     │     │ (WebSocket) │
-└─────────────────┘     └─────────────┘     └──────────────────┘     └─────────────┘
-
-Run: python ogc_bridge.py --listen-port 9210 --ogc-port 921
-```
-
-**Option B: Direct Mode (Pre-processed data)**
-```
-┌─────────────────┐     ┌──────────────────┐     ┌─────────────┐
-│  Your App with  │────>│    OBS Plugin    │────>│  OBS Studio │
-│  OGC Processing │     │    (Port 921)    │     │             │
-└─────────────────┘     └──────────────────┘     └─────────────┘
-
-Run: python ogc_obs_service.py --port 921
-```
+| File | Description |
+|------|-------------|
+| `obs_open_golf_coach.py` | OBS Python script - creates and updates text sources |
+| `ogc_openapi_service.py` | OpenAPI server - receives data from Nova, processes with opengolfcoach |
+| `test_sender.py` | Test utility - simulate shots for testing |
+| `requirements.txt` | Python dependencies |
 
 ## Troubleshooting
 
-### "Could not connect to OBS"
-- Ensure OBS is running
-- Check that WebSocket server is enabled in OBS (`Tools` > `WebSocket Server Settings`)
-- Verify the port number matches
+### "Could not connect to OBS plugin"
+- Make sure OBS is running with the script loaded
+- Check that the OBS script shows "Server listening on port 9211" in the script log
+- Verify no other application is using port 9211
 
 ### "Connection refused on port 921"
-- Ensure the OBS script is loaded or standalone service is running
+- Make sure `ogc_openapi_service.py` is running
 - Check Windows Firewall isn't blocking the port
-- Verify no other application is using port 921
 
-### Sources not appearing
-- Click "Create Sources" in the script settings
-- For standalone service, ensure OBS is running before starting the service
+### Sources not appearing in OBS
+- Make sure you clicked "Create All Sources" in the script settings
 - Check the OBS script log for errors (`Tools` > `Scripts` > `Script Log`)
+- Verify you have a scene selected before creating sources
 
 ### Data not updating
-- Verify data is being sent (use test_sender.py to confirm)
-- Check that JSON is newline-terminated
-- Review the script/service log for parsing errors
+- Check that the OpenAPI service shows "Received data from..." messages
+- Verify the test sender works: `python test_sender.py`
+- Check OBS script log for "Received shot data" messages
+
+### opengolfcoach import error
+- Install the package: `pip install opengolfcoach`
+- Make sure you're using the correct Python environment
+
+## How It Works
+
+1. **Nova** sends shot data in OpenAPI format:
+   ```json
+   {
+     "BallData": {
+       "Speed": 156.6,
+       "VLA": 12.5,
+       "HLA": -2.0,
+       "TotalSpin": 2800,
+       "SpinAxis": 15.0
+     },
+     "Units": "Yards"
+   }
+   ```
+
+2. **OpenAPI Service** converts and processes:
+   ```python
+   import opengolfcoach
+   result = opengolfcoach.calculate_derived_values(json_input)
+   ```
+
+3. **OBS Plugin** receives enriched data:
+   ```json
+   {
+     "open_golf_coach": {
+       "carry_distance_yards": 202.9,
+       "shot_name": "Fade",
+       "shot_rank": "A",
+       ...
+     }
+   }
+   ```
+
+4. **Text sources** update with formatted values
 
 ## License
 
 MIT License - See LICENSE file for details.
 
-## Contributing
-
-Contributions welcome! Please open an issue or pull request on GitHub.
-
 ## Credits
 
 - [Open Golf Coach](https://github.com/OpenLaunchLabs/open-golf-coach) - Golf shot calculations
 - [OBS Studio](https://obsproject.com/) - Streaming software
-- [obs-websocket](https://github.com/obsproject/obs-websocket) - OBS WebSocket protocol
