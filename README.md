@@ -2,7 +2,6 @@
 
 Display real-time golf shot data from Nova launch monitor directly in OBS Studio. Each data point appears as a separate, moveable text source.
 
-**Nova → OBS (port 921)** - No middleman needed!
 
 ## Requirements
 
