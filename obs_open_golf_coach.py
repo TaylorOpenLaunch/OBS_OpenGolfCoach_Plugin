@@ -40,6 +40,8 @@ except ImportError:
 DATA_POINTS = {
     # Input metrics (Imperial)
     "ball_speed": ("open_golf_coach.us_customary_units.ball_speed_mph", "Ball Speed", "{:.1f}", "mph"),
+    "clubhead_speed": ("open_golf_coach.us_customary_units.club_speed_mph", "Club Speed", "{:.1f}", "mph"),
+    "smash_factor": ("open_golf_coach.smash_factor", "Smash Factor", "{:.2f}", ""),
     "launch_angle": ("vertical_launch_angle_degrees", "Launch Angle", "{:.1f}", "°"),
     "launch_direction": ("horizontal_launch_angle_degrees", "Launch Dir", "{:+.1f}", "°"),
     "total_spin": ("total_spin_rpm", "Total Spin", "{:.0f}", "rpm"),
@@ -127,6 +129,15 @@ def convert_openapi_to_ogc(openapi_data: dict) -> dict:
         ogc_input["backspin_rpm"] = backspin
     if sidespin is not None:
         ogc_input["sidespin_rpm"] = sidespin
+
+    # ClubData -> clubhead_speed_meters_per_second
+    club_data = openapi_data.get("ClubData", {})
+    club_speed = club_data.get("Speed")
+    if club_speed is not None:
+        if is_imperial:
+            ogc_input["club_speed_meters_per_second"] = club_speed * 0.44704
+        else:
+            ogc_input["club_speed_meters_per_second"] = club_speed
 
     return ogc_input
 
@@ -448,6 +459,8 @@ def script_properties():
     obs.obs_properties_add_bool(props, "show_units", "Show Units")
 
     obs.obs_properties_add_bool(props, "enable_ball_speed", "Ball Speed")
+    obs.obs_properties_add_bool(props, "enable_clubhead_speed", "Clubhead Speed")
+    obs.obs_properties_add_bool(props, "enable_smash_factor", "Smash Factor")
     obs.obs_properties_add_bool(props, "enable_launch_angle", "Launch Angle (vertical)")
     obs.obs_properties_add_bool(props, "enable_launch_direction", "Launch Direction (horizontal)")
     obs.obs_properties_add_bool(props, "enable_total_spin", "Total Spin")
@@ -523,6 +536,7 @@ def create_sources_clicked(props, prop):
 def send_test_data_clicked(props, prop):
     test_data = {
         "ball_speed_meters_per_second": 70.0,
+        "club_speed_meters_per_second": 47.0,
         "vertical_launch_angle_degrees": 12.5,
         "horizontal_launch_angle_degrees": -2.0,
         "total_spin_rpm": 2800.0,
@@ -535,10 +549,13 @@ def send_test_data_clicked(props, prop):
             "hang_time_seconds": 7.2,
             "backspin_rpm": 2700.5,
             "sidespin_rpm": 724.8,
+            "club_speed_meters_per_second": 47.0,
+            "smash_factor": 1.49,
             "shot_name": "Fade",
             "shot_rank": "A",
             "us_customary_units": {
                 "ball_speed_mph": 156.6,
+                "club_speed_mph": 105.1,
                 "carry_distance_yards": 202.9,
                 "total_distance_yards": 213.3,
                 "offline_distance_yards": -6.8,
