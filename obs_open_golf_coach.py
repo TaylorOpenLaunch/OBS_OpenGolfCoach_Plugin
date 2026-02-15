@@ -75,6 +75,47 @@ DATA_POINTS = {
     "shot_rank": ("open_golf_coach.shot_rank", "Grade", "{}", ""),
 }
 
+# Dashboard grid layout: each key maps to {"x", "y", "w", "h"}
+# 6 rows, standard cell 260w x 100h, gap 10px, x starts at 155px
+DASHBOARD_LAYOUT = {
+    # Row 0 (y=20): Shot info
+    "shot_rank":              {"x": 155,  "y": 20, "w": 260, "h": 100},
+    "shot_name":              {"x": 425,  "y": 20, "w": 530, "h": 100},  # double-wide
+    # Row 1 (y=140): Club
+    "clubhead_speed":         {"x": 155,  "y": 140, "w": 260, "h": 100},
+    "smash_factor":           {"x": 425,  "y": 140, "w": 260, "h": 100},
+    "distance_efficiency":    {"x": 695,  "y": 140, "w": 260, "h": 100},
+    "optimal_max_distance":   {"x": 965,  "y": 140, "w": 260, "h": 100},
+    # Row 2 (y=260): Ball
+    "ball_speed":             {"x": 155,  "y": 260, "w": 260, "h": 100},
+    "launch_angle":           {"x": 425,  "y": 260, "w": 260, "h": 100},
+    "launch_direction":       {"x": 695,  "y": 260, "w": 260, "h": 100},
+    # Row 3 (y=380): Spin
+    "total_spin":             {"x": 155,  "y": 380, "w": 260, "h": 100},
+    "backspin":               {"x": 425,  "y": 380, "w": 260, "h": 100},
+    "sidespin":               {"x": 695,  "y": 380, "w": 260, "h": 100},
+    "spin_axis":              {"x": 965,  "y": 380, "w": 260, "h": 100},
+    # Row 4 (y=500): Flight
+    "carry":                  {"x": 155,  "y": 500, "w": 260, "h": 100},
+    "total":                  {"x": 425,  "y": 500, "w": 260, "h": 100},
+    "offline":                {"x": 695,  "y": 500, "w": 260, "h": 100},
+    "peak_height":            {"x": 965,  "y": 500, "w": 260, "h": 100},
+    "hang_time":              {"x": 1235, "y": 500, "w": 260, "h": 100},
+    "descent_angle":          {"x": 1505, "y": 500, "w": 260, "h": 100},
+    # Row 5 (y=620): Delivery
+    "club_path":              {"x": 155,  "y": 620, "w": 260, "h": 100},
+    "face_to_target":         {"x": 425,  "y": 620, "w": 260, "h": 100},
+    "face_to_path":           {"x": 695,  "y": 620, "w": 260, "h": 100},
+}
+
+CATEGORY_HEADERS = [
+    {"name": "CLUB",     "x": 155, "y": 118, "w": 1070},
+    {"name": "BALL",     "x": 155, "y": 238, "w":  800},
+    {"name": "SPIN",     "x": 155, "y": 358, "w": 1070},
+    {"name": "FLIGHT",   "x": 155, "y": 478, "w": 1610},
+    {"name": "DELIVERY", "x": 155, "y": 598, "w":  800},
+]
+
 # =============================================================================
 # Global State
 # =============================================================================
@@ -252,12 +293,29 @@ def create_text_source(key: str, initial_text: str = "---") -> bool:
         obs.script_log(obs.LOG_WARNING, "Could not get scene object")
         return False
 
+    layout = DASHBOARD_LAYOUT[key]
+
     settings = obs.obs_data_create()
     obs.obs_data_set_string(settings, "text", initial_text)
 
+    # Background box
+    obs.obs_data_set_int(settings, "bk_color", 0x2A2A2A)
+    obs.obs_data_set_int(settings, "bk_opacity", 75)
+
+    # Fixed bounding box
+    obs.obs_data_set_bool(settings, "extents", True)
+    obs.obs_data_set_int(settings, "extents_cx", layout["w"])
+    obs.obs_data_set_int(settings, "extents_cy", layout["h"])
+    obs.obs_data_set_bool(settings, "extents_wrap", True)
+
+    # Center text in cell
+    obs.obs_data_set_string(settings, "align", "center")
+    obs.obs_data_set_string(settings, "valign", "center")
+
     font_obj = obs.obs_data_create()
     obs.obs_data_set_string(font_obj, "face", "Arial")
-    obs.obs_data_set_int(font_obj, "size", 48)
+    obs.obs_data_set_int(font_obj, "size", 28)
+    obs.obs_data_set_int(font_obj, "flags", 1)  # bold
     obs.obs_data_set_obj(settings, "font", font_obj)
     obs.obs_data_release(font_obj)
 
@@ -278,11 +336,8 @@ def create_text_source(key: str, initial_text: str = "---") -> bool:
     scene_item = obs.obs_scene_add(scene, source)
     if scene_item:
         pos = obs.vec2()
-        idx = list(DATA_POINTS.keys()).index(key) if key in DATA_POINTS else 0
-        col = idx // 11
-        row = idx % 11
-        pos.x = 50 + (col * 910)
-        pos.y = 50 + (row * 90)
+        pos.x = layout["x"]
+        pos.y = layout["y"]
         obs.obs_sceneitem_set_pos(scene_item, pos)
         obs.script_log(obs.LOG_INFO, f"SUCCESS: Added {source_name} to scene")
         state.created_sources.add(source_name)
@@ -311,8 +366,84 @@ def update_all_sources(data: dict):
         if formatted:
             update_text_source(key, formatted)
 
+def create_category_header(header: dict) -> bool:
+    """Create a category header label source in the current scene."""
+    source_name = f"{SOURCE_PREFIX}header_{header['name']}"
+
+    existing_source = obs.obs_get_source_by_name(source_name)
+    if existing_source:
+        obs.obs_source_release(existing_source)
+        state.created_sources.add(source_name)
+        return True
+
+    current_scene = obs.obs_frontend_get_current_scene()
+    if not current_scene:
+        return False
+
+    scene = obs.obs_scene_from_source(current_scene)
+    if not scene:
+        obs.obs_source_release(current_scene)
+        return False
+
+    settings = obs.obs_data_create()
+    obs.obs_data_set_string(settings, "text", header["name"])
+
+    # Dark background at 60% opacity
+    obs.obs_data_set_int(settings, "bk_color", 0x1A1A1A)
+    obs.obs_data_set_int(settings, "bk_opacity", 60)
+
+    # Fixed bounding box
+    obs.obs_data_set_bool(settings, "extents", True)
+    obs.obs_data_set_int(settings, "extents_cx", header["w"])
+    obs.obs_data_set_int(settings, "extents_cy", 22)
+
+    # Left-aligned
+    obs.obs_data_set_string(settings, "align", "left")
+    obs.obs_data_set_string(settings, "valign", "center")
+
+    # Light gray text color
+    obs.obs_data_set_int(settings, "color", 0xCCCCCC)
+
+    font_obj = obs.obs_data_create()
+    obs.obs_data_set_string(font_obj, "face", "Arial")
+    obs.obs_data_set_int(font_obj, "size", 14)
+    obs.obs_data_set_int(font_obj, "flags", 1)  # bold
+    obs.obs_data_set_obj(settings, "font", font_obj)
+    obs.obs_data_release(font_obj)
+
+    source = None
+    for source_type in ["text_gdiplus", "text_gdiplus_v2", "text_gdiplus_v3"]:
+        source = obs.obs_source_create(source_type, source_name, settings, None)
+        if source:
+            break
+
+    obs.obs_data_release(settings)
+
+    if not source:
+        obs.obs_source_release(current_scene)
+        return False
+
+    scene_item = obs.obs_scene_add(scene, source)
+    if scene_item:
+        pos = obs.vec2()
+        pos.x = header["x"]
+        pos.y = header["y"]
+        obs.obs_sceneitem_set_pos(scene_item, pos)
+        state.created_sources.add(source_name)
+
+    obs.obs_source_release(source)
+    obs.obs_source_release(current_scene)
+    return scene_item is not None
+
 def create_all_sources():
     created_count = 0
+
+    # Create category headers first
+    for header in CATEGORY_HEADERS:
+        if create_category_header(header):
+            created_count += 1
+
+    # Create data sources
     for key in DATA_POINTS.keys():
         if state.enabled_sources.get(key, False):
             if create_text_source(key, "---"):
