@@ -1,5 +1,5 @@
 # setup-python.ps1
-# Downloads and prepares the Python 3.12.12 embeddable package for bundling
+# Downloads and prepares the Python 3.12.10 embeddable package for bundling
 # with the OBS Open Golf Coach plugin installer.
 #
 # Usage: powershell -ExecutionPolicy Bypass -File setup-python.ps1 [-OutputDir build/python-embed]
@@ -10,7 +10,7 @@ param(
 
 $ErrorActionPreference = "Stop"
 
-$PythonVersion = "3.12.12"
+$PythonVersion = "3.12.10"
 $PythonZipUrl = "https://www.python.org/ftp/python/$PythonVersion/python-$PythonVersion-embed-amd64.zip"
 $GetPipUrl = "https://bootstrap.pypa.io/get-pip.py"
 $PthFile = "python312._pth"
