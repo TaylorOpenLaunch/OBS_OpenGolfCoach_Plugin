@@ -54,8 +54,21 @@ DATA_POINTS = {
     "hang_time": ("open_golf_coach.hang_time_seconds", "Hang Time", "{:.2f}", "s"),
 
     # Spin breakdown
+    "spin_axis": ("open_golf_coach.spin_axis_degrees", "Spin Axis", "{:+.1f}", "°"),
     "backspin": ("open_golf_coach.backspin_rpm", "Backspin", "{:.0f}", "rpm"),
     "sidespin": ("open_golf_coach.sidespin_rpm", "Sidespin", "{:+.0f}", "rpm"),
+
+    # Trajectory analysis
+    "descent_angle": ("open_golf_coach.descent_angle_degrees", "Descent", "{:.1f}", "°"),
+
+    # Efficiency
+    "distance_efficiency": ("open_golf_coach.distance_efficiency_percent", "Efficiency", "{:.1f}", "%"),
+    "optimal_max_distance": ("open_golf_coach.us_customary_units.optimal_maximum_distance_yards", "Optimal Max", "{:.1f}", "yds"),
+
+    # Club delivery (estimated)
+    "club_path": ("open_golf_coach.club_path_degrees", "Club Path", "{:+.1f}", "°"),
+    "face_to_target": ("open_golf_coach.club_face_to_target_degrees", "Face to Target", "{:+.1f}", "°"),
+    "face_to_path": ("open_golf_coach.club_face_to_path_degrees", "Face to Path", "{:+.1f}", "°"),
 
     # Shot classification
     "shot_name": ("open_golf_coach.shot_name", "Shot", "{}", ""),
@@ -469,8 +482,15 @@ def script_properties():
     obs.obs_properties_add_bool(props, "enable_offline", "Offline Distance")
     obs.obs_properties_add_bool(props, "enable_peak_height", "Peak Height")
     obs.obs_properties_add_bool(props, "enable_hang_time", "Hang Time")
+    obs.obs_properties_add_bool(props, "enable_spin_axis", "Spin Axis")
     obs.obs_properties_add_bool(props, "enable_backspin", "Backspin")
     obs.obs_properties_add_bool(props, "enable_sidespin", "Sidespin")
+    obs.obs_properties_add_bool(props, "enable_descent_angle", "Descent Angle")
+    obs.obs_properties_add_bool(props, "enable_distance_efficiency", "Distance Efficiency")
+    obs.obs_properties_add_bool(props, "enable_optimal_max_distance", "Optimal Max Distance")
+    obs.obs_properties_add_bool(props, "enable_club_path", "Club Path (estimated)")
+    obs.obs_properties_add_bool(props, "enable_face_to_target", "Face to Target (estimated)")
+    obs.obs_properties_add_bool(props, "enable_face_to_path", "Face to Path (estimated)")
     obs.obs_properties_add_bool(props, "enable_shot_name", "Shot Shape")
     obs.obs_properties_add_bool(props, "enable_shot_rank", "Shot Grade")
 
@@ -549,8 +569,15 @@ def send_test_data_clicked(props, prop):
             "hang_time_seconds": 7.2,
             "backspin_rpm": 2700.5,
             "sidespin_rpm": 724.8,
+            "spin_axis_degrees": 15.0,
             "club_speed_meters_per_second": 47.0,
             "smash_factor": 1.49,
+            "descent_angle_degrees": 42.3,
+            "distance_efficiency_percent": 87.5,
+            "optimal_maximum_distance_meters": 211.8,
+            "club_path_degrees": -1.2,
+            "club_face_to_target_degrees": 2.8,
+            "club_face_to_path_degrees": 4.0,
             "shot_name": "Fade",
             "shot_rank": "A",
             "us_customary_units": {
@@ -559,7 +586,8 @@ def send_test_data_clicked(props, prop):
                 "carry_distance_yards": 202.9,
                 "total_distance_yards": 213.3,
                 "offline_distance_yards": -6.8,
-                "peak_height_yards": 31.2
+                "peak_height_yards": 31.2,
+                "optimal_maximum_distance_yards": 231.6
             }
         }
     }
