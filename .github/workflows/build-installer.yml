@@ -1,0 +1,41 @@
+name: Build Windows Installer
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  build-installer:
+    name: Build Installer
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Prepare Python Embed + Dependencies
+        shell: pwsh
+        run: |
+          powershell -ExecutionPolicy Bypass -File installer/setup-python.ps1 -OutputDir build/python-embed
+
+      - name: Build Installer with Inno Setup
+        uses: Minionguyjpro/Inno-Setup-Action@v1.3.1
+        with:
+          path: installer/installer.iss
+          options: /DAppVersion=${{ github.ref_name }}
+
+      - name: Upload Installer Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: OpenGolfCoach-OBS-Setup
+          path: build/installer-output/OpenGolfCoach-OBS-Setup.exe
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: build/installer-output/OpenGolfCoach-OBS-Setup.exe
+          generate_release_notes: true
