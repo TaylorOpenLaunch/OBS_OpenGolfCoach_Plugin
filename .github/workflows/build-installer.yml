@@ -23,7 +23,7 @@ jobs:
           powershell -ExecutionPolicy Bypass -File installer/setup-python.ps1 -OutputDir build/python-embed
 
       - name: Build Installer with Inno Setup
-        uses: Minionguyjpro/Inno-Setup-Action@v1.3.1
+        uses: Minionguyjpro/Inno-Setup-Action@v1.2.7
         with:
           path: installer/installer.iss
           options: /DAppVersion=${{ github.ref_name }}
