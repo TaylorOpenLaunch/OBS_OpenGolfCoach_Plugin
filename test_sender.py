@@ -23,6 +23,7 @@ def generate_openapi_shot() -> dict:
     """Generate shot data in OpenAPI format (what Nova sends)."""
     # Randomize input parameters within realistic ranges
     ball_speed_mph = random.uniform(100, 175)  # mph
+    clubhead_speed_mph = ball_speed_mph / random.uniform(1.35, 1.55)  # realistic smash factor range
     launch_angle_v = random.uniform(8, 18)
     launch_angle_h = random.uniform(-5, 5)
     total_spin = random.uniform(2000, 4000)
@@ -36,6 +37,9 @@ def generate_openapi_shot() -> dict:
             "TotalSpin": round(total_spin, 0),
             "SpinAxis": round(spin_axis, 1)
         },
+        "ClubData": {
+            "Speed": round(clubhead_speed_mph, 1)
+        },
         "Units": "Yards"
     }
 
@@ -43,6 +47,8 @@ def generate_ogc_shot() -> dict:
     """Generate shot data in OGC format with calculated values."""
     # This simulates what the OpenAPI service would send to OBS
     ball_speed_mps = random.uniform(50, 80)
+    smash_factor = random.uniform(1.35, 1.55)
+    club_speed_mps = ball_speed_mps / smash_factor
     launch_angle_v = random.uniform(8, 18)
     launch_angle_h = random.uniform(-5, 5)
     total_spin = random.uniform(2000, 4000)
@@ -88,6 +94,7 @@ def generate_ogc_shot() -> dict:
 
     return {
         "ball_speed_meters_per_second": round(ball_speed_mps, 1),
+        "club_speed_meters_per_second": round(club_speed_mps, 1),
         "vertical_launch_angle_degrees": round(launch_angle_v, 1),
         "horizontal_launch_angle_degrees": round(launch_angle_h, 1),
         "total_spin_rpm": round(total_spin, 0),
@@ -100,10 +107,13 @@ def generate_ogc_shot() -> dict:
             "hang_time_seconds": round(hang_time, 2),
             "backspin_rpm": round(total_spin * 0.95, 1),
             "sidespin_rpm": round(total_spin * spin_axis / 90, 1),
+            "club_speed_meters_per_second": round(club_speed_mps, 1),
+            "smash_factor": round(smash_factor, 2),
             "shot_name": shot_name,
             "shot_rank": rank,
             "us_customary_units": {
                 "ball_speed_mph": round(ball_speed_mps * 2.237, 1),
+                "club_speed_mph": round(club_speed_mps * 2.237, 1),
                 "carry_distance_yards": round(carry * 1.094, 1),
                 "total_distance_yards": round(total * 1.094, 1),
                 "offline_distance_yards": round(offline * 1.094, 1),
