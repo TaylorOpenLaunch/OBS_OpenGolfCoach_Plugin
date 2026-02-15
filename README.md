@@ -1,48 +1,79 @@
 # OBS Open Golf Coach Plugin
 
-Display real-time golf shot data from Nova launch monitor directly in OBS Studio. Each data point appears as a separate, moveable text source.
+Display real-time golf shot data from Nova launch monitor directly in OBS Studio. Sources are automatically arranged in a broadcast-quality dashboard grid grouped by category.
 
-
-![OBS Open Golf Coach Screenshot](OGC.png)
+![OBS Open Golf Coach Dashboard](OGC_OBS.png)
 
 ## Features
 
-- **22 data points** as individual, moveable OBS text sources
-- Clubhead speed, smash factor, and distance efficiency metrics
+- **22 data points** as individual OBS text sources in a grouped dashboard grid
+- **Category headers** — CLUB, BALL, SPIN, FLIGHT, DELIVERY
+- Dark background boxes with centered bold text for broadcast readability
+- Clubhead speed, smash factor, distance efficiency, and optimal max distance
 - Estimated club delivery (club path, face to target, face to path)
-- Shot classification with named shapes and letter grades
+- Shot classification with named shapes (Fade, Draw, Pull Slice, etc.) and letter grades
 - Toggle labels, units, and individual data points on/off
-- Built-in test button to preview layout without a launch monitor
+- Built-in test button to preview the dashboard without a launch monitor
 
-## Requirements
+## Install
 
-- **OBS Studio** with Python scripting enabled
-- **Python 3.10+** - [Download Python](https://www.python.org/downloads/) (use 3.11 for best OBS compatibility)
-- **opengolfcoach** pip package (for calculating carry, shot shape, etc.)
+### Option A: Windows Installer (Recommended)
 
-## Quick Start
+1. Download **OpenGolfCoach-OBS-Setup.exe** from the [latest release](https://github.com/TaylorOpenLaunch/OBS_OpenGolfCoach_Plugin/releases)
+2. Run the installer — it bundles Python 3.12 and the `opengolfcoach` library so you don't need to install Python yourself
+3. The installer places files at:
+   ```
+   %APPDATA%\obs-studio\ogc-python\
+   ├── python.exe              ← bundled Python 3.12
+   ├── scripts\
+   │   └── obs_open_golf_coach.py   ← the OBS plugin script
+   ├── README.md
+   └── LICENSE
+   ```
+4. The installer automatically configures OBS to use the bundled Python
+5. Open **OBS Studio** → `Tools` → `Scripts` → click `+` → browse to:
+   ```
+   %APPDATA%\obs-studio\ogc-python\scripts\obs_open_golf_coach.py
+   ```
+6. Click **"Create All Sources"** in the script settings
+7. Connect your Nova launch monitor on port 921
 
-### 1. Install opengolfcoach
+### Option B: Build from Source
 
-Install in the **same Python** that OBS uses:
+Requires **Python 3.10+** ([download](https://www.python.org/downloads/) — use 3.11 or 3.12 for best OBS compatibility).
 
-```bash
-pip install opengolfcoach
+1. Clone the repository:
+   ```bash
+   git clone https://github.com/TaylorOpenLaunch/OBS_OpenGolfCoach_Plugin.git
+   ```
+
+2. Install the `opengolfcoach` library in the **same Python** that OBS uses:
+   ```bash
+   pip install opengolfcoach
+   ```
+
+3. Open **OBS Studio** → `Tools` → `Scripts` → `Python Settings` tab → set your Python path:
+   - `C:\Users\<username>\AppData\Local\Programs\Python\Python312`
+   - Or if installed for all users: `C:\Program Files\Python312`
+
+4. Click `+` → select `obs_open_golf_coach.py` from the cloned repo
+
+5. Click **"Create All Sources"** in the script settings
+
+#### Building the Installer
+
+To build the Windows installer yourself:
+
+```powershell
+# 1. Prepare the bundled Python environment
+cd installer
+powershell -ExecutionPolicy Bypass -File setup-python.ps1
+
+# 2. Build with Inno Setup (requires Inno Setup 6 installed)
+iscc /DAppVersion="1.2.0" installer.iss
 ```
 
-### 2. Add the OBS Script
-
-1. Open **OBS Studio** → `Tools` → `Scripts`
-2. Click `Python Settings` tab → set your Python path:
-   - Windows: `C:\Users\<username>\AppData\Local\Programs\Python\Python311`
-   - Or if installed for all users: `C:\Program Files\Python311`
-3. Click `+` → select `obs_open_golf_coach.py`
-
-### 3. Create Sources
-
-1. Select a scene in OBS
-2. Click **"Create All Sources"** in the script settings
-3. Position the `OGC_` sources on your stream
+The output installer will be at `build/installer-output/OpenGolfCoach-OBS-Setup.exe`.
 
 ## How It Works
 
@@ -60,82 +91,34 @@ Nova (launch monitor)
 └─────────────────────────────┘
     │
     ▼
-OBS Text Sources (moveable)
+OBS Dashboard Grid (22 sources)
 ```
 
 ## Data Points
 
-### Input Metrics
-
-| Source | Description |
-|--------|-------------|
-| `OGC_ball_speed` | Ball speed (mph) |
-| `OGC_clubhead_speed` | Club speed (mph) |
-| `OGC_smash_factor` | Smash factor (ball speed / club speed) |
-| `OGC_launch_angle` | Vertical launch angle (°) |
-| `OGC_launch_direction` | Horizontal launch direction (°) |
-| `OGC_total_spin` | Total spin rate (rpm) |
-
-### Calculated Metrics
-
-| Source | Description |
-|--------|-------------|
-| `OGC_carry` | Carry distance (yds) |
-| `OGC_total` | Total distance (yds) |
-| `OGC_offline` | Offline / left-right distance (yds) |
-| `OGC_peak_height` | Peak height (yds) |
-| `OGC_hang_time` | Hang time (s) |
-
-### Spin Breakdown
-
-| Source | Description |
-|--------|-------------|
-| `OGC_spin_axis` | Spin axis (°) |
-| `OGC_backspin` | Backspin (rpm) |
-| `OGC_sidespin` | Sidespin (rpm) |
-
-### Trajectory
-
-| Source | Description |
-|--------|-------------|
-| `OGC_descent_angle` | Descent angle (°) |
-
-### Efficiency
-
-| Source | Description |
-|--------|-------------|
-| `OGC_distance_efficiency` | Distance efficiency (%) |
-| `OGC_optimal_max_distance` | Optimal max distance for the ball speed (yds) |
-
-### Club Delivery (Estimated)
-
-| Source | Description |
-|--------|-------------|
-| `OGC_club_path` | Club path (°) |
-| `OGC_face_to_target` | Face angle to target (°) |
-| `OGC_face_to_path` | Face angle to path (°) |
-
-### Shot Classification
-
-| Source | Description |
-|--------|-------------|
-| `OGC_shot_name` | Shot shape (Fade, Draw, etc.) |
-| `OGC_shot_rank` | Quality grade (S, A, B, C, D) |
+| Category | Sources |
+|----------|---------|
+| **Shot** | Grade, Shot Shape |
+| **Club** | Club Speed, Smash Factor, Efficiency, Optimal Max |
+| **Ball** | Ball Speed, Launch Angle, Launch Direction |
+| **Spin** | Total Spin, Backspin, Sidespin, Spin Axis |
+| **Flight** | Carry, Total, Offline, Peak Height, Hang Time, Descent Angle |
+| **Delivery** | Club Path, Face to Target, Face to Path |
 
 ## Troubleshooting
 
 **"opengolfcoach NOT installed"** in script description:
-- Install with `pip install opengolfcoach`
-- Make sure you're using the same Python that OBS is configured to use
+- Installer users: re-run the installer
+- Source users: `pip install opengolfcoach` using the same Python that OBS is configured to use
 
 **No clubhead speed or smash factor:**
 - Nova must send `ClubData` alongside `BallData` — check that your Nova firmware supports club data
 
-**Connection drops after one shot:**
-- Update to the latest script version (implements keep-alive)
-
 **Sources not appearing:**
 - Make sure a scene is selected before clicking "Create All Sources"
+
+**Connection drops after one shot:**
+- Update to the latest plugin version (implements keep-alive)
 
 ## License
 
