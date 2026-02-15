@@ -279,8 +279,10 @@ def create_text_source(key: str, initial_text: str = "---") -> bool:
     if scene_item:
         pos = obs.vec2()
         idx = list(DATA_POINTS.keys()).index(key) if key in DATA_POINTS else 0
-        pos.x = 50
-        pos.y = 50 + (idx * 70)
+        col = idx // 11
+        row = idx % 11
+        pos.x = 50 + (col * 910)
+        pos.y = 50 + (row * 90)
         obs.obs_sceneitem_set_pos(scene_item, pos)
         obs.script_log(obs.LOG_INFO, f"SUCCESS: Added {source_name} to scene")
         state.created_sources.add(source_name)
